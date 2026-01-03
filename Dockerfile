@@ -27,8 +27,25 @@ COPY . /var/www/html/
 # Set working directory
 WORKDIR /var/www/html
 
-# Install Composer dependencies
-RUN composer install --no-dev --no-interaction --optimize-autoloader
+# ✅ ADD DEBUGGING: Check files before composer install
+RUN echo "=== DEBUG: Checking files ===" && \
+    ls -la && \
+    echo "=== DEBUG: Checking composer.json ===" && \
+    cat composer.json && \
+    echo "=== DEBUG: Checking if vendor exists ===" && \
+    ls -la vendor/ 2>/dev/null || echo "No vendor directory"
+
+# Install Composer dependencies WITH VERBOSE OUTPUT
+RUN composer install --no-dev --no-interaction --optimize-autoloader --verbose
+
+# ✅ ADD DEBUGGING: Check after install
+RUN echo "=== DEBUG: After composer install ===" && \
+    echo "Vendor directory:" && \
+    ls -la vendor/ && \
+    echo "Google packages:" && \
+    ls -la vendor/google/ 2>/dev/null || echo "No google directory" && \
+    echo "Dialogflow package:" && \
+    ls -la vendor/google/cloud-dialogflow/ 2>/dev/null || echo "No dialogflow package"
 
 # Set proper permissions
 RUN chown -R www-data:www-data /var/www/html \
@@ -46,6 +63,14 @@ RUN cat > /etc/apache2/sites-available/000-default.conf << 'EOF'
     </Directory>
 </VirtualHost>
 EOF
+
+# ✅ ADD: Create a test PHP file to verify installation
+RUN echo "<?php
+require __DIR__ . '/vendor/autoload.php';
+echo 'PHP Version: ' . phpversion() . \"\\n\";
+echo 'Dialogflow IntentsClient exists: ' . (class_exists('Google\\\\Cloud\\\\Dialogflow\\\\V2\\\\IntentsClient') ? 'YES' : 'NO') . \"\\n\";
+echo 'Google Cloud Core exists: ' . (class_exists('Google\\\\Cloud\\\\Core\\\\ServiceBuilder') ? 'YES' : 'NO') . \"\\n\";
+?>" > /var/www/html/test-install.php
 
 EXPOSE 80
 CMD ["apache2-foreground"]
