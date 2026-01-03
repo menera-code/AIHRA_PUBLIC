@@ -2,7 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use Google\Cloud\Dialogflow\V2\IntentsClient;
+use Google\Cloud\Dialogflow\V2\Client\IntentsClient;
+use Google\Cloud\Dialogflow\V2\ListIntentsRequest;
 use Illuminate\Http\JsonResponse;
 
 class DialogflowSyncController extends Controller
@@ -13,20 +14,24 @@ class DialogflowSyncController extends Controller
             // Get project ID
             $projectId = env('DIALOGFLOW_PROJECT_ID', 'aihra-472311');
             
-            // Get credentials (either full JSON or build from pieces)
+            // Get credentials
             $credentials = $this->getDialogflowCredentials();
             
-            // Create Dialogflow client
+            // Create Dialogflow client (v2.3+ syntax)
             $client = new IntentsClient([
                 'credentials' => $credentials,
                 'projectId' => $projectId
             ]);
 
-            // List intents
-            $parent = $client->agentName($projectId);
+            // List intents (v2.3+ syntax)
+            $parent = "projects/{$projectId}/agent";
+            $request = new ListIntentsRequest();
+            $request->setParent($parent);
+            
+            $response = $client->listIntents($request);
             $intents = [];
             
-            foreach ($client->listIntents($parent) as $intent) {
+            foreach ($response->iterateAllElements() as $intent) {
                 $intents[] = [
                     'id' => $intent->getName(),
                     'display_name' => $intent->getDisplayName(),
@@ -34,17 +39,17 @@ class DialogflowSyncController extends Controller
                 ];
             }
 
-            $client->close();
-
             return response()->json([
                 'success' => true,
-                'intents' => $intents
+                'intents' => $intents,
+                'count' => count($intents)
             ]);
 
         } catch (\Throwable $e) {
             return response()->json([
                 'success' => false,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => env('APP_DEBUG') ? $e->getTraceAsString() : null
             ], 500);
         }
     }
