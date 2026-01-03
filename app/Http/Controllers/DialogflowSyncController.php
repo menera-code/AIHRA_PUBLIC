@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Google\Cloud\Dialogflow\V2\Client\IntentsClient;
 use Google\Cloud\Dialogflow\V2\ListIntentsRequest;
 use Google\Cloud\Dialogflow\V2\Intent\TrainingPhrase;
+use Google\Cloud\Dialogflow\V2\Intent\Message;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -20,215 +21,170 @@ class DialogflowSyncController extends Controller
             'Access-Control-Allow-Credentials' => 'true'
         ];
         
-        // ✅ CRITICAL: Handle OPTIONS preflight request
         if ($request->isMethod('OPTIONS')) {
             return response()->json([], 200)->withHeaders($headers);
         }
         
         try {
-            // Get credentials
             $credentials = $this->getDialogflowCredentials();
             
-            // If no credentials, return mock data
             if (!$credentials) {
-                \Log::warning('DialogflowSync: No credentials found, returning mock data');
                 return response()->json([
                     'success' => true,
                     'data' => [
                         'intents_synced' => 6,
                         'intents' => [
                             [
-                                'id' => 'projects/aihra-472311/agent/intents/mock-1',
+                                'id' => 1,
+                                'intent_name' => 'projects/aihra-472311/agent/intents/0008b207-67fa-42cf-abd1-db1fbdbc2fc8',
                                 'display_name' => 'EmployeeDevelopment_StudyGrantC_016',
-                                'training_phrases' => 5,
-                                'responses' => 2
+                                'training_phrases_text' => '"How do I apply for study grant?", "What are the eligibility criteria?"',
+                                'training_phrases_count' => 2,
+                                'responses_text' => '"Study grants are available for...", "You need to submit..."',
+                                'responses_count' => 2,
+                                'status' => 'Regular',
+                                'last_modified' => '2024-01-08 14:30:00',
+                                'actions' => 'Edit | Delete'
                             ],
                             [
-                                'id' => 'projects/aihra-472311/agent/intents/mock-2', 
+                                'id' => 2,
+                                'intent_name' => 'projects/aihra-472311/agent/intents/002f487e-ab1f-4757-99c4-d74b1ad0aa94',
                                 'display_name' => 'EmployeeDevelopment_Seminars_003',
-                                'training_phrases' => 5,
-                                'responses' => 3
-                            ],
-                            [
-                                'id' => 'projects/aihra-472311/agent/intents/mock-3',
-                                'display_name' => 'Ranking_and_Promotion_Points_CES_224',
-                                'training_phrases' => 4,
-                                'responses' => 2
+                                'training_phrases_text' => '"What seminars are available?", "How to register for seminars?"',
+                                'training_phrases_count' => 2,
+                                'responses_text' => '"Upcoming seminars include...", "Register through the portal..."',
+                                'responses_count' => 2,
+                                'status' => 'Regular',
+                                'last_modified' => '2024-01-08 14:25:00',
+                                'actions' => 'Edit | Delete'
                             ]
                         ],
-                        'is_mock_data' => true,
-                        'message' => 'Dialogflow credentials not configured. Using mock data.'
-                    ],
-                    'message' => 'Using mock data - configure Dialogflow credentials'
+                        'is_mock_data' => true
+                    ]
                 ])->withHeaders($headers);
             }
             
-            // Get project ID
             $projectId = env('DIALOGFLOW_PROJECT_ID', 'aihra-472311');
             
-            // Debug: Log connection details
-            \Log::info('DialogflowSync: Attempting to connect', [
-                'project_id' => $projectId,
-                'client_email' => $credentials['client_email'] ?? 'unknown'
-            ]);
-
-            // Create Dialogflow client
             $client = new IntentsClient([
                 'credentials' => $credentials,
                 'projectId' => $projectId
             ]);
 
-            // List intents with language code - IMPORTANT: Use correct format
             $parent = "projects/{$projectId}/agent";
             $requestObj = new ListIntentsRequest();
             $requestObj->setParent($parent);
-            $requestObj->setLanguageCode('en'); // Ensure this matches your Dialogflow language
+            $requestObj->setLanguageCode('en-US');
             $requestObj->setPageSize(100);
             
-            \Log::info('DialogflowSync: Making API request', [
-                'parent' => $parent,
-                'language_code' => 'en'
-            ]);
-
             $response = $client->listIntents($requestObj);
             $intents = [];
-            $intentCount = 0;
+            $counter = 1;
             
             foreach ($response->iterateAllElements() as $intent) {
-                $intentCount++;
-                
-                // Get training phrases count - FIXED METHOD
+                // Get training phrases
                 $trainingPhrasesCount = 0;
+                $trainingPhrasesText = '';
+                $trainingPhrasesList = $intent->getTrainingPhrases();
                 
-                // Try multiple ways to get training phrases
-                $trainingPhrases = $intent->getTrainingPhrases();
-                
-                if ($trainingPhrases) {
-                    // Method 1: Check if it's iterable
-                    if (is_iterable($trainingPhrases)) {
-                        foreach ($trainingPhrases as $phrase) {
-                            if ($phrase instanceof TrainingPhrase) {
-                                $parts = $phrase->getParts();
-                                if ($parts && (is_countable($parts) || is_iterable($parts))) {
-                                    $trainingPhrasesCount++;
-                                }
-                            } else {
-                                $trainingPhrasesCount++;
+                if ($trainingPhrasesList) {
+                    $trainingPhrasesArray = iterator_to_array($trainingPhrasesList);
+                    $trainingPhrasesCount = count($trainingPhrasesArray);
+                    
+                    // Build training phrases text with quotes
+                    $phraseTexts = [];
+                    foreach ($trainingPhrasesArray as $phrase) {
+                        if ($phrase instanceof TrainingPhrase) {
+                            $parts = $phrase->getParts();
+                            $text = '';
+                            foreach ($parts as $part) {
+                                $text .= $part->getText();
+                            }
+                            if (!empty(trim($text))) {
+                                $phraseTexts[] = '"' . $text . '"';
                             }
                         }
                     }
+                    $trainingPhrasesText = implode(', ', array_slice($phraseTexts, 0, 3)); // Show first 3
+                    if (count($phraseTexts) > 3) {
+                        $trainingPhrasesText .= '...';
+                    }
+                }
+                
+                // Get responses
+                $responsesCount = 0;
+                $responsesText = '';
+                $messagesList = $intent->getMessages();
+                
+                if ($messagesList) {
+                    $messagesArray = iterator_to_array($messagesList);
+                    $responsesCount = count($messagesArray);
                     
-                    // Method 2: If still 0, try to serialize and check
-                    if ($trainingPhrasesCount === 0) {
-                        $serialized = serialize($trainingPhrases);
-                        if (strpos($serialized, 'TrainingPhrase') !== false) {
-                            // Count occurrences of TrainingPhrase in serialized data
-                            $trainingPhrasesCount = substr_count($serialized, 'TrainingPhrase');
+                    // Build responses text
+                    $responseTexts = [];
+                    foreach ($messagesArray as $message) {
+                        if ($message instanceof Message) {
+                            $text = $message->getText();
+                            if ($text) {
+                                $textParts = $text->getText();
+                                if (count($textParts) > 0) {
+                                    $responseText = implode(' ', $textParts);
+                                    if (!empty(trim($responseText))) {
+                                        $responseTexts[] = '"' . substr($responseText, 0, 50) . '..."'; // Truncate
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-                
-                // Get responses count
-                $responsesCount = 0;
-                $messages = $intent->getMessages();
-                
-                if ($messages) {
-                    if (is_iterable($messages)) {
-                        $responsesCount = iterator_count($messages);
-                    } elseif (is_countable($messages)) {
-                        $responsesCount = count($messages);
+                    $responsesText = implode(', ', array_slice($responseTexts, 0, 2)); // Show first 2
+                    if (count($responseTexts) > 2) {
+                        $responsesText .= '...';
                     }
                 }
                 
-                // Get intent details
-                $intentData = [
-                    'id' => $intent->getName(),
+                // Determine status
+                $status = 'Regular';
+                if (method_exists($intent, 'getIsFallback') && $intent->getIsFallback()) {
+                    $status = 'Fallback';
+                }
+                
+                // Get last modified (if available)
+                $lastModified = 'N/A';
+                if (method_exists($intent, 'getUpdateTime')) {
+                    $updateTime = $intent->getUpdateTime();
+                    if ($updateTime) {
+                        $lastModified = $updateTime->toDateTime()->format('Y-m-d H:i:s');
+                    }
+                }
+                
+                $intents[] = [
+                    'id' => $counter++,
+                    'intent_name' => $intent->getName(),
                     'display_name' => $intent->getDisplayName(),
-                    'training_phrases' => $trainingPhrasesCount,
-                    'responses' => $responsesCount,
-                    'webhook_state' => method_exists($intent, 'getWebhookState') ? $intent->getWebhookState() : 0,
-                    'is_fallback' => method_exists($intent, 'getIsFallback') ? $intent->getIsFallback() : false,
+                    'training_phrases_text' => $trainingPhrasesText ?: '0',
+                    'training_phrases_count' => $trainingPhrasesCount,
+                    'responses_text' => $responsesText ?: '0',
+                    'responses_count' => $responsesCount,
+                    'status' => $status,
+                    'last_modified' => $lastModified,
+                    'actions' => 'Edit | Delete'
                 ];
-                
-                $intents[] = $intentData;
-                
-                // Log details for debugging (first 5 intents only)
-                if ($intentCount <= 5) {
-                    \Log::info("DialogflowSync: Intent #{$intentCount}", [
-                        'display_name' => $intent->getDisplayName(),
-                        'training_phrases_count' => $trainingPhrasesCount,
-                        'responses_count' => $responsesCount,
-                        'id' => $intent->getName(),
-                        'has_webhook' => $intentData['webhook_state'] > 0
-                    ]);
-                    
-                    // Debug: Try to get raw training phrases data
-                    if ($trainingPhrasesCount === 0 && $trainingPhrases) {
-                        \Log::debug("DialogflowSync: Training phrases debug for {$intent->getDisplayName()}", [
-                            'training_phrases_type' => gettype($trainingPhrases),
-                            'training_phrases_class' => get_class($trainingPhrases),
-                            'is_iterable' => is_iterable($trainingPhrases),
-                            'is_countable' => is_countable($trainingPhrases),
-                            'methods' => get_class_methods($trainingPhrases)
-                        ]);
-                    }
-                }
             }
 
-            \Log::info('DialogflowSync: API call completed', [
-                'total_intents_fetched' => count($intents),
-                'first_intent_sample' => count($intents) > 0 ? $intents[0] : null
-            ]);
-
-            // If all training phrases are 0, try alternative API approach
-            $totalPhrases = array_sum(array_column($intents, 'training_phrases'));
-            if ($totalPhrases === 0) {
-                \Log::warning('DialogflowSync: All training phrases returned as 0, trying alternative approach');
-                
-                // Try without language code (get all languages)
-                $requestObjNoLang = new ListIntentsRequest();
-                $requestObjNoLang->setParent($parent);
-                $requestObjNoLang->setPageSize(10); // Just get a few for testing
-                
-                $responseNoLang = $client->listIntents($requestObjNoLang);
-                
-                foreach ($responseNoLang->iterateAllElements() as $testIntent) {
-                    if ($testIntent->getDisplayName() === $intents[0]['display_name'] ?? '') {
-                        $testPhrases = $testIntent->getTrainingPhrases();
-                        \Log::info('DialogflowSync: Test intent without language code', [
-                            'display_name' => $testIntent->getDisplayName(),
-                            'phrases_data' => $this->inspectTrainingPhrases($testPhrases)
-                        ]);
-                        break;
-                    }
-                }
-            }
-
-            // Return success with real data
             return response()->json([
                 'success' => true,
                 'data' => [
                     'intents_synced' => count($intents),
                     'intents' => $intents,
                     'is_mock_data' => false,
-                    'message' => 'Successfully fetched ' . count($intents) . ' intents from Dialogflow',
-                    'debug_info' => [
-                        'project_id' => $projectId,
-                        'language_code' => 'en',
-                        'total_training_phrases' => $totalPhrases,
-                        'api_version' => 'V2',
-                        'note' => $totalPhrases === 0 ? 'Training phrases may be in a different language or format' : 'OK'
-                    ]
+                    'message' => 'Successfully fetched ' . count($intents) . ' intents from Dialogflow'
                 ],
                 'message' => 'Sync successful'
             ])->withHeaders($headers);
 
         } catch (\Throwable $e) {
-            \Log::error('DialogflowSync: Error occurred', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
+            \Log::error('DialogflowSync Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
             ]);
             
             return response()->json([
@@ -237,96 +193,27 @@ class DialogflowSyncController extends Controller
                 'data' => [
                     'intents_synced' => 0,
                     'intents' => [],
-                    'is_mock_data' => true,
-                    'error' => $e->getMessage()
+                    'is_mock_data' => true
                 ]
             ], 500)->withHeaders($headers);
         }
     }
     
-    private function inspectTrainingPhrases($trainingPhrases)
-    {
-        if (!$trainingPhrases) {
-            return 'null';
-        }
-        
-        $result = [
-            'type' => gettype($trainingPhrases),
-            'class' => get_class($trainingPhrases),
-            'is_iterable' => is_iterable($trainingPhrases),
-            'is_countable' => is_countable($trainingPhrases),
-        ];
-        
-        if (is_iterable($trainingPhrases)) {
-            $count = 0;
-            $sample = [];
-            foreach ($trainingPhrases as $phrase) {
-                $count++;
-                if ($count <= 3) {
-                    if ($phrase instanceof TrainingPhrase) {
-                        $parts = $phrase->getParts();
-                        $text = '';
-                        if ($parts) {
-                            foreach ($parts as $part) {
-                                if (method_exists($part, 'getText')) {
-                                    $text .= $part->getText();
-                                }
-                            }
-                        }
-                        $sample[] = [
-                            'type' => 'TrainingPhrase',
-                            'text' => $text
-                        ];
-                    } else {
-                        $sample[] = [
-                            'type' => gettype($phrase),
-                            'value' => $phrase
-                        ];
-                    }
-                }
-                if ($count > 10) break;
-            }
-            $result['count'] = $count;
-            $result['sample'] = $sample;
-        }
-        
-        return $result;
-    }
-    
     private function getDialogflowCredentials()
     {
-        \Log::info('DialogflowSync: Getting credentials');
-        
-        // Try to get full JSON first
         $fullJson = env('DIALOGFLOW_CREDENTIALS_JSON');
         
         if ($fullJson) {
-            \Log::info('DialogflowSync: Found DIALOGFLOW_CREDENTIALS_JSON env variable');
             $credentials = json_decode($fullJson, true);
             if (json_last_error() === JSON_ERROR_NONE) {
-                \Log::info('DialogflowSync: Successfully parsed JSON credentials', [
-                    'client_email' => $credentials['client_email'] ?? 'unknown',
-                    'project_id' => $credentials['project_id'] ?? 'unknown'
-                ]);
                 return $credentials;
-            } else {
-                \Log::error('DialogflowSync: Failed to parse JSON credentials', [
-                    'json_error' => json_last_error_msg()
-                ]);
             }
         }
         
-        // If no full JSON, try to build from pieces
         $privateKey = env('DIALOGFLOW_PRIVATE_KEY');
         $clientEmail = env('DIALOGFLOW_CLIENT_EMAIL');
         
         if ($privateKey && $clientEmail) {
-            \Log::info('DialogflowSync: Building credentials from env variables', [
-                'client_email' => $clientEmail,
-                'has_private_key' => !empty($privateKey)
-            ]);
-            
-            // Build credentials array from pieces
             return [
                 'type' => 'service_account',
                 'project_id' => env('DIALOGFLOW_PROJECT_ID', 'aihra-472311'),
@@ -341,31 +228,22 @@ class DialogflowSyncController extends Controller
             ];
         }
         
-        // Last resort: check for file
         $filePath = storage_path('app/dialogflow.json');
         if (file_exists($filePath)) {
-            \Log::info('DialogflowSync: Found credentials file', ['path' => $filePath]);
             return $filePath;
         }
         
-        \Log::warning('DialogflowSync: No credentials found');
-        // Instead of throwing exception, return null for mock data
         return null;
     }
     
     private function formatPrivateKey($privateKey)
     {
-        \Log::debug('DialogflowSync: Formatting private key');
-        
         if (empty($privateKey)) {
-            \Log::error('DialogflowSync: Private key is empty');
             return '';
         }
         
-        // Ensure the private key has proper line breaks
         $key = str_replace(['\n', '\\n'], "\n", $privateKey);
         
-        // Add BEGIN/END markers if missing
         if (!str_contains($key, 'BEGIN PRIVATE KEY')) {
             $key = "-----BEGIN PRIVATE KEY-----\n" . $key . "\n-----END PRIVATE KEY-----\n";
         }
