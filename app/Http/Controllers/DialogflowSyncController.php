@@ -6,6 +6,7 @@ use Google\Cloud\Dialogflow\V2\Client\IntentsClient;
 use Google\Cloud\Dialogflow\V2\ListIntentsRequest;
 use Google\Cloud\Dialogflow\V2\Intent\TrainingPhrase;
 use Google\Cloud\Dialogflow\V2\Intent\Message;
+use Google\Cloud\Dialogflow\V2\Intent\Message\Text;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -97,8 +98,11 @@ class DialogflowSyncController extends Controller
                         if ($phrase instanceof TrainingPhrase) {
                             $parts = $phrase->getParts();
                             $text = '';
-                            foreach ($parts as $part) {
-                                $text .= $part->getText();
+                            // Handle RepeatedField properly
+                            if ($parts) {
+                                foreach ($parts as $part) {
+                                    $text .= $part->getText();
+                                }
                             }
                             if (!empty(trim($text))) {
                                 $phraseTexts[] = '"' . $text . '"';
@@ -111,7 +115,7 @@ class DialogflowSyncController extends Controller
                     }
                 }
                 
-                // Get responses
+                // Get responses - FIXED: Handle RepeatedField properly
                 $responsesCount = 0;
                 $responsesText = '';
                 $messagesList = $intent->getMessages();
@@ -125,10 +129,15 @@ class DialogflowSyncController extends Controller
                     foreach ($messagesArray as $message) {
                         if ($message instanceof Message) {
                             $text = $message->getText();
-                            if ($text) {
+                            if ($text instanceof Text) {
                                 $textParts = $text->getText();
-                                if (count($textParts) > 0) {
-                                    $responseText = implode(' ', $textParts);
+                                if ($textParts && $textParts->count() > 0) {
+                                    // Convert RepeatedField to array properly
+                                    $partsArray = [];
+                                    foreach ($textParts as $part) {
+                                        $partsArray[] = $part;
+                                    }
+                                    $responseText = implode(' ', $partsArray);
                                     if (!empty(trim($responseText))) {
                                         $responseTexts[] = '"' . substr($responseText, 0, 50) . '..."'; // Truncate
                                     }
@@ -161,9 +170,9 @@ class DialogflowSyncController extends Controller
                     'id' => $counter++,
                     'intent_name' => $intent->getName(),
                     'display_name' => $intent->getDisplayName(),
-                    'training_phrases_text' => $trainingPhrasesText ?: '0',
+                    'training_phrases_text' => $trainingPhrasesText ?: 'No training phrases',
                     'training_phrases_count' => $trainingPhrasesCount,
-                    'responses_text' => $responsesText ?: '0',
+                    'responses_text' => $responsesText ?: 'No responses',
                     'responses_count' => $responsesCount,
                     'status' => $status,
                     'last_modified' => $lastModified,
