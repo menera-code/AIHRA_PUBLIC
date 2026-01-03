@@ -9,3 +9,6 @@ Route::get('/', function () {
 
 Route::match(['get', 'post'], '/dialogflow/sync', [DialogflowSyncController::class, 'sync']);
 
+Route::get('/test', function() {
+    return response()->json(['message' => 'Laravel is working', 'time' => now()]);
+});
