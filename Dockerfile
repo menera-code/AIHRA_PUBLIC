@@ -38,6 +38,9 @@ RUN echo "=== DEBUG: Checking files ===" && \
 # Install Composer dependencies WITH VERBOSE OUTPUT
 RUN composer install --no-dev --no-interaction --optimize-autoloader --verbose
 
+# ✅ INSTALL CORS PACKAGE
+RUN composer require fruitcake/laravel-cors --no-interaction
+
 # ✅ DEBUGGING: Check after install
 RUN echo "=== DEBUG: After composer install ===" && \
     echo "Vendor directory:" && \
@@ -45,7 +48,9 @@ RUN echo "=== DEBUG: After composer install ===" && \
     echo "Google packages:" && \
     ls -la vendor/google/ 2>/dev/null || echo "No google directory" && \
     echo "Dialogflow package:" && \
-    ls -la vendor/google/cloud-dialogflow/ 2>/dev/null || echo "No dialogflow package"
+    ls -la vendor/google/cloud-dialogflow/ 2>/dev/null || echo "No dialogflow package" && \
+    echo "CORS package:" && \
+    ls -la vendor/fruitcake/ 2>/dev/null || echo "No fruitcake directory"
 
 # Set proper permissions
 RUN chown -R www-data:www-data /var/www/html \
