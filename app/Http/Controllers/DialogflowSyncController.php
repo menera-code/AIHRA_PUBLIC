@@ -10,9 +10,12 @@ class DialogflowSyncController extends Controller
     public function sync(): JsonResponse
     {
         try {
-            // Use the JSON file you already have
+            // Get credentials from environment variable or file
+            $credentials = $this->getDialogflowCredentials();
+            
             $client = new IntentsClient([
-                'credentials' => storage_path('app/dialogflow/dialogflow.json')
+                'credentials' => $credentials,
+                'projectId' => env('DIALOGFLOW_PROJECT_ID')
             ]);
 
             $parent = $client->agentName(env('DIALOGFLOW_PROJECT_ID'));
@@ -39,5 +42,23 @@ class DialogflowSyncController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+    
+    private function getDialogflowCredentials()
+    {
+        // Check if JSON string is in environment variable (GitHub Actions)
+        if ($json = env('DIALOGFLOW_CREDENTIALS_JSON')) {
+            // Return as array (parsed JSON)
+            return json_decode($json, true);
+        }
+        
+        // Fallback to file path for local development
+        $filePath = storage_path('app/dialogflow/dialogflow.json');
+        
+        if (!file_exists($filePath)) {
+            throw new \Exception('Dialogflow credentials not found. Set DIALOGFLOW_CREDENTIALS_JSON env variable or create credentials file.');
+        }
+        
+        return $filePath;
     }
 }
