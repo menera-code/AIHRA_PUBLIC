@@ -6,7 +6,6 @@ use Google\Cloud\Dialogflow\V2\Client\IntentsClient;
 use Google\Cloud\Dialogflow\V2\ListIntentsRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Google\Cloud\Dialogflow\V2\Intent\TrainingPhrase;
 
 class DialogflowSyncController extends Controller
 {
@@ -39,21 +38,21 @@ class DialogflowSyncController extends Controller
                         'intents' => [
                             [
                                 'id' => 'projects/aihra-472311/agent/intents/mock-1',
-                                'display_name' => 'Welcome Intent',
-                                'training_phrases' => 5,
+                                'display_name' => 'EmployeeDevelopment_StudyGrantC_016',
+                                'training_phrases' => 3,
                                 'responses' => 2
                             ],
                             [
                                 'id' => 'projects/aihra-472311/agent/intents/mock-2', 
-                                'display_name' => 'FAQ Intent',
-                                'training_phrases' => 8,
+                                'display_name' => 'EmployeeDevelopment_Seminars_003',
+                                'training_phrases' => 5,
                                 'responses' => 3
                             ],
                             [
                                 'id' => 'projects/aihra-472311/agent/intents/mock-3',
-                                'display_name' => 'Fallback Intent',
-                                'training_phrases' => 1,
-                                'responses' => 1
+                                'display_name' => 'Ranking_and_Promotion_Points_CES_224',
+                                'training_phrases' => 4,
+                                'responses' => 2
                             ]
                         ],
                         'is_mock_data' => true,
@@ -83,13 +82,11 @@ class DialogflowSyncController extends Controller
             $requestObj = new ListIntentsRequest();
             $requestObj->setParent($parent);
             $requestObj->setLanguageCode('en'); // Set language code
-            $requestObj->setPageSize(2000); // Increase page size
-            $requestObj->setIntentView(ListIntentsRequest\IntentView::INTENT_VIEW_FULL); // Get full intent data
+            $requestObj->setPageSize(100); // Set reasonable page size
             
             \Log::info('DialogflowSync: Making API request', [
                 'parent' => $parent,
-                'language_code' => 'en',
-                'page_size' => 2000
+                'language_code' => 'en'
             ]);
 
             $response = $client->listIntents($requestObj);
@@ -103,35 +100,30 @@ class DialogflowSyncController extends Controller
                 $trainingPhrasesList = $intent->getTrainingPhrases();
                 $trainingPhrasesCount = 0;
                 
-                if ($trainingPhrasesList && count($trainingPhrasesList) > 0) {
-                    $trainingPhrasesCount = count($trainingPhrasesList);
+                if ($trainingPhrasesList) {
+                    // For older API versions, it might be a repeated field
+                    $trainingPhrasesCount = iterator_count($trainingPhrasesList);
                     
-                    // Debug: Log first few training phrases
-                    if ($intentCount <= 3) {
-                        $samplePhrases = [];
-                        foreach ($trainingPhrasesList as $index => $phrase) {
-                            if ($index < 3) {
-                                $parts = $phrase->getParts();
-                                $text = '';
-                                foreach ($parts as $part) {
-                                    $text .= $part->getText();
-                                }
-                                $samplePhrases[] = $text;
-                            }
-                        }
-                        \Log::info("DialogflowSync: Intent sample - {$intent->getDisplayName()}", [
-                            'training_phrases_count' => $trainingPhrasesCount,
-                            'sample_phrases' => $samplePhrases
-                        ]);
-                    }
+                    // Alternative method: convert to array and count
+                    // $trainingPhrasesArray = iterator_to_array($trainingPhrasesList);
+                    // $trainingPhrasesCount = count($trainingPhrasesArray);
                 }
                 
                 // Get responses count
                 $responsesList = $intent->getMessages();
                 $responsesCount = 0;
                 
-                if ($responsesList && count($responsesList) > 0) {
-                    $responsesCount = count($responsesList);
+                if ($responsesList) {
+                    $responsesCount = iterator_count($responsesList);
+                }
+                
+                // Get webhook state
+                $webhookState = $intent->getWebhookState();
+                $isFallback = false;
+                
+                // Try to get isFallback if method exists
+                if (method_exists($intent, 'getIsFallback')) {
+                    $isFallback = $intent->getIsFallback();
                 }
                 
                 $intentData = [
@@ -139,29 +131,27 @@ class DialogflowSyncController extends Controller
                     'display_name' => $intent->getDisplayName(),
                     'training_phrases' => $trainingPhrasesCount,
                     'responses' => $responsesCount,
-                    'webhook_state' => $intent->getWebhookState(),
-                    'priority' => $intent->getPriority(),
-                    'is_fallback' => $intent->getIsFallback(),
+                    'webhook_state' => $webhookState,
+                    'is_fallback' => $isFallback,
                 ];
                 
                 $intents[] = $intentData;
                 
-                // Log detailed info for first 5 intents
-                if ($intentCount <= 5) {
-                    \Log::debug("DialogflowSync: Intent details", [
-                        'name' => $intent->getName(),
+                // Log detailed info for first 3 intents
+                if ($intentCount <= 3) {
+                    \Log::info("DialogflowSync: Intent #{$intentCount}", [
                         'display_name' => $intent->getDisplayName(),
-                        'training_phrases_raw_count' => $trainingPhrasesList ? count($trainingPhrasesList) : 0,
-                        'responses_raw_count' => $responsesList ? count($responsesList) : 0,
-                        'is_fallback' => $intent->getIsFallback(),
-                        'has_webhook' => $intent->getWebhookState() > 0
+                        'training_phrases' => $trainingPhrasesCount,
+                        'responses' => $responsesCount,
+                        'id' => $intent->getName(),
+                        'has_training_phrases' => $trainingPhrasesCount > 0
                     ]);
                 }
             }
 
             \Log::info('DialogflowSync: API call completed', [
                 'total_intents_fetched' => count($intents),
-                'first_few_intents' => array_slice($intents, 0, 3)
+                'sample_count' => $trainingPhrasesCount
             ]);
 
             // Return success with real data
@@ -175,8 +165,10 @@ class DialogflowSyncController extends Controller
                     'debug_info' => [
                         'project_id' => $projectId,
                         'language_code' => 'en',
-                        'intent_view' => 'FULL',
-                        'sample_intent' => count($intents) > 0 ? $intents[0] : null
+                        'sample_intent_data' => count($intents) > 0 ? [
+                            'first_intent_name' => $intents[0]['display_name'],
+                            'first_intent_phrases' => $intents[0]['training_phrases']
+                        ] : null
                     ]
                 ],
                 'message' => 'Sync successful'
@@ -193,11 +185,6 @@ class DialogflowSyncController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Dialogflow sync failed: ' . $e->getMessage(),
-                'error_details' => [
-                    'message' => $e->getMessage(),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine()
-                ],
                 'data' => [
                     'intents_synced' => 0,
                     'intents' => [],
@@ -283,12 +270,6 @@ class DialogflowSyncController extends Controller
         // Add BEGIN/END markers if missing
         if (!str_contains($key, 'BEGIN PRIVATE KEY')) {
             $key = "-----BEGIN PRIVATE KEY-----\n" . $key . "\n-----END PRIVATE KEY-----\n";
-        }
-        
-        // Validate the key format
-        if (!str_starts_with($key, '-----BEGIN PRIVATE KEY-----') || 
-            !str_ends_with(trim($key), '-----END PRIVATE KEY-----')) {
-            \Log::error('DialogflowSync: Private key format invalid');
         }
         
         return $key;
