@@ -16,7 +16,13 @@ class DialogflowSyncController extends Controller
             'Access-Control-Allow-Origin' => '*',
             'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
             'Access-Control-Allow-Headers' => 'Content-Type, Authorization, X-Requested-With, X-CSRF-TOKEN',
+            'Access-Control-Allow-Credentials' => 'true'
         ];
+        
+        // ✅ CRITICAL: Handle OPTIONS preflight request
+        if ($request->isMethod('OPTIONS')) {
+            return response()->json([], 200)->withHeaders($headers);
+        }
         
         try {
             // Get credentials
@@ -141,8 +147,7 @@ class DialogflowSyncController extends Controller
             return $filePath;
         }
         
-        // Instead of throwing exception, return mock data
-        // This allows your x10 app to work even if credentials are missing
+        // Instead of throwing exception, return null for mock data
         return null;
     }
     
