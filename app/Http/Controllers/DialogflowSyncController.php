@@ -10,17 +10,22 @@ class DialogflowSyncController extends Controller
     public function sync(): JsonResponse
     {
         try {
-            // Get credentials from environment variable or file
+            // Get project ID
+            $projectId = env('DIALOGFLOW_PROJECT_ID', 'aihra-472311');
+            
+            // Get credentials (either full JSON or build from pieces)
             $credentials = $this->getDialogflowCredentials();
             
+            // Create Dialogflow client
             $client = new IntentsClient([
                 'credentials' => $credentials,
-                'projectId' => env('DIALOGFLOW_PROJECT_ID')
+                'projectId' => $projectId
             ]);
 
-            $parent = $client->agentName(env('DIALOGFLOW_PROJECT_ID'));
-
+            // List intents
+            $parent = $client->agentName($projectId);
             $intents = [];
+            
             foreach ($client->listIntents($parent) as $intent) {
                 $intents[] = [
                     'id' => $intent->getName(),
@@ -46,19 +51,55 @@ class DialogflowSyncController extends Controller
     
     private function getDialogflowCredentials()
     {
-        // Check if JSON string is in environment variable (GitHub Actions)
-        if ($json = env('DIALOGFLOW_CREDENTIALS_JSON')) {
-            // Return as array (parsed JSON)
-            return json_decode($json, true);
+        // Try to get full JSON first
+        $fullJson = env('DIALOGFLOW_CREDENTIALS_JSON');
+        
+        if ($fullJson) {
+            $credentials = json_decode($fullJson, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                return $credentials;
+            }
         }
         
-        // Fallback to file path for local development
-        $filePath = storage_path('app/dialogflow/dialogflow.json');
+        // If no full JSON, try to build from pieces
+        $privateKey = env('DIALOGFLOW_PRIVATE_KEY');
+        $clientEmail = env('DIALOGFLOW_CLIENT_EMAIL');
         
-        if (!file_exists($filePath)) {
-            throw new \Exception('Dialogflow credentials not found. Set DIALOGFLOW_CREDENTIALS_JSON env variable or create credentials file.');
+        if ($privateKey && $clientEmail) {
+            // Build credentials array from pieces
+            return [
+                'type' => 'service_account',
+                'project_id' => env('DIALOGFLOW_PROJECT_ID', 'aihra-472311'),
+                'private_key_id' => env('DIALOGFLOW_PRIVATE_KEY_ID', '24cbcd0644cf59089189291679ee9463f1c8c9a9'),
+                'private_key' => $this->formatPrivateKey($privateKey),
+                'client_email' => $clientEmail,
+                'client_id' => env('DIALOGFLOW_CLIENT_ID', '116880942476929227852'),
+                'auth_uri' => 'https://accounts.google.com/o/oauth2/auth',
+                'token_uri' => 'https://oauth2.googleapis.com/token',
+                'auth_provider_x509_cert_url' => 'https://www.googleapis.com/oauth2/v1/certs',
+                'client_x509_cert_url' => env('DIALOGFLOW_CLIENT_X509_CERT_URL', 'https://www.googleapis.com/robot/v1/metadata/x509/aihra-dialogflow%40aihra-472311.iam.gserviceaccount.com')
+            ];
         }
         
-        return $filePath;
+        // Last resort: check for file
+        $filePath = storage_path('app/dialogflow.json');
+        if (file_exists($filePath)) {
+            return $filePath;
+        }
+        
+        throw new \Exception('Dialogflow credentials not found. Set DIALOGFLOW_CREDENTIALS_JSON or individual credential pieces.');
+    }
+    
+    private function formatPrivateKey($privateKey)
+    {
+        // Ensure the private key has proper line breaks
+        $key = str_replace(['\n', '\\n'], "\n", $privateKey);
+        
+        // Add BEGIN/END markers if missing
+        if (!str_contains($key, 'BEGIN PRIVATE KEY')) {
+            $key = "-----BEGIN PRIVATE KEY-----\n" . $key . "\n-----END PRIVATE KEY-----\n";
+        }
+        
+        return $key;
     }
 }
