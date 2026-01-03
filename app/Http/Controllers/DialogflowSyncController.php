@@ -75,7 +75,8 @@ class DialogflowSyncController extends Controller
             $parent = "projects/{$projectId}/agent";
             $requestObj = new ListIntentsRequest();
             $requestObj->setParent($parent);
-            $requestObj->setLanguageCode('en');
+            // Try without language code first
+            // $requestObj->setLanguageCode('en');
             $requestObj->setPageSize(100);
             
             $response = $client->listIntents($requestObj);
@@ -83,12 +84,13 @@ class DialogflowSyncController extends Controller
             $counter = 1;
             
             foreach ($response->iterateAllElements() as $intent) {
-                // Get training phrases
+                // Get training phrases - FIXED
                 $trainingPhrasesCount = 0;
                 $trainingPhrasesText = '';
                 $trainingPhrasesList = $intent->getTrainingPhrases();
                 
                 if ($trainingPhrasesList) {
+                    // Convert to array first
                     $trainingPhrasesArray = iterator_to_array($trainingPhrasesList);
                     $trainingPhrasesCount = count($trainingPhrasesArray);
                     
@@ -98,29 +100,38 @@ class DialogflowSyncController extends Controller
                         if ($phrase instanceof TrainingPhrase) {
                             $parts = $phrase->getParts();
                             $text = '';
-                            // Handle RepeatedField properly
+                            
+                            // Handle RepeatedField for parts
                             if ($parts) {
-                                foreach ($parts as $part) {
+                                // Convert parts to array
+                                $partsArray = iterator_to_array($parts);
+                                foreach ($partsArray as $part) {
                                     $text .= $part->getText();
                                 }
                             }
+                            
                             if (!empty(trim($text))) {
-                                $phraseTexts[] = '"' . $text . '"';
+                                $phraseTexts[] = '"' . $this->cleanText($text) . '"';
                             }
                         }
                     }
-                    $trainingPhrasesText = implode(', ', array_slice($phraseTexts, 0, 3)); // Show first 3
-                    if (count($phraseTexts) > 3) {
-                        $trainingPhrasesText .= '...';
+                    
+                    // Format training phrases text
+                    if (!empty($phraseTexts)) {
+                        $trainingPhrasesText = implode(', ', array_slice($phraseTexts, 0, 3)); // Show first 3
+                        if (count($phraseTexts) > 3) {
+                            $trainingPhrasesText .= '...';
+                        }
                     }
                 }
                 
-                // Get responses - FIXED: Handle RepeatedField properly
+                // Get responses - FIXED
                 $responsesCount = 0;
                 $responsesText = '';
                 $messagesList = $intent->getMessages();
                 
                 if ($messagesList) {
+                    // Convert to array first
                     $messagesArray = iterator_to_array($messagesList);
                     $responsesCount = count($messagesArray);
                     
@@ -131,23 +142,27 @@ class DialogflowSyncController extends Controller
                             $text = $message->getText();
                             if ($text instanceof Text) {
                                 $textParts = $text->getText();
+                                
+                                // Handle RepeatedField for text parts
                                 if ($textParts && $textParts->count() > 0) {
-                                    // Convert RepeatedField to array properly
-                                    $partsArray = [];
-                                    foreach ($textParts as $part) {
-                                        $partsArray[] = $part;
-                                    }
+                                    // Convert to array
+                                    $partsArray = iterator_to_array($textParts);
                                     $responseText = implode(' ', $partsArray);
+                                    
                                     if (!empty(trim($responseText))) {
-                                        $responseTexts[] = '"' . substr($responseText, 0, 50) . '..."'; // Truncate
+                                        $responseTexts[] = '"' . $this->cleanText(substr($responseText, 0, 50)) . '..."';
                                     }
                                 }
                             }
                         }
                     }
-                    $responsesText = implode(', ', array_slice($responseTexts, 0, 2)); // Show first 2
-                    if (count($responseTexts) > 2) {
-                        $responsesText .= '...';
+                    
+                    // Format responses text
+                    if (!empty($responseTexts)) {
+                        $responsesText = implode(', ', array_slice($responseTexts, 0, 2)); // Show first 2
+                        if (count($responseTexts) > 2) {
+                            $responsesText .= '...';
+                        }
                     }
                 }
                 
@@ -206,6 +221,22 @@ class DialogflowSyncController extends Controller
                 ]
             ], 500)->withHeaders($headers);
         }
+    }
+    
+    /**
+     * Clean text for display
+     */
+    private function cleanText($text)
+    {
+        // Remove extra whitespace
+        $text = trim($text);
+        // Escape quotes
+        $text = str_replace('"', '\"', $text);
+        // Limit length
+        if (strlen($text) > 100) {
+            $text = substr($text, 0, 97) . '...';
+        }
+        return $text;
     }
     
     private function getDialogflowCredentials()
