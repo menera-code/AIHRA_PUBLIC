@@ -24,8 +24,10 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 # Copy application files
 COPY . /var/www/html/
 
-# Install PHP dependencies
+# Set working directory
 WORKDIR /var/www/html
+
+# Install PHP dependencies
 RUN if [ -f "composer.json" ]; then \
     composer install --no-dev --optimize-autoloader --no-interaction; \
     fi
@@ -34,31 +36,20 @@ RUN if [ -f "composer.json" ]; then \
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
 
-# ✅ FIXED: Change DocumentRoot to /var/www/html/public for Laravel
+# ✅ FIXED: Create proper Apache configuration for Laravel
 RUN echo '<VirtualHost *:80>
-    DocumentRoot /var/www/html/public
-    
-    <Directory /var/www/html/public>
-        Options -Indexes +FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
-    
-    # Also allow .htaccess in parent directory if needed
-    <Directory /var/www/html>
-        AllowOverride All
-    </Directory>
+DocumentRoot /var/www/html/public
+
+<Directory /var/www/html/public>
+    Options -Indexes +FollowSymLinks
+    AllowOverride All
+    Require all granted
+</Directory>
 </VirtualHost>' > /etc/apache2/sites-available/000-default.conf
 
-# Create Laravel storage directories if they don't exist
+# Create Laravel storage directories
 RUN mkdir -p storage/framework/{sessions,views,cache} \
     && chmod -R 775 storage bootstrap/cache
-
-# Generate Laravel key if .env doesn't exist
-RUN if [ ! -f ".env" ] && [ -f ".env.example" ]; then \
-    cp .env.example .env; \
-    php artisan key:generate; \
-    fi
 
 EXPOSE 80
 CMD ["apache2-foreground"]
