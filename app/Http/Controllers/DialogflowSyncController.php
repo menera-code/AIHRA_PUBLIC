@@ -4,8 +4,6 @@ namespace App\Http\Controllers;
 
 use Google\Cloud\Dialogflow\V2\Client\IntentsClient;
 use Google\Cloud\Dialogflow\V2\ListIntentsRequest;
-use Google\Cloud\Dialogflow\V2\GetIntentRequest;
-use Google\Cloud\Dialogflow\V2\Intent\TrainingPhrase;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -46,47 +44,70 @@ class DialogflowSyncController extends Controller
             ]);
 
             $parent = "projects/{$projectId}/agent";
+            $requestObj = new ListIntentsRequest();
+            $requestObj->setParent($parent);
+            // Don't set language code - let it use default
+            $requestObj->setPageSize(100);
             
-            // Method 1: Try with default language (no language code)
-            try {
-                $requestObj = new ListIntentsRequest();
-                $requestObj->setParent($parent);
-                // Don't set language code - use default
-                $requestObj->setPageSize(50); // Get first 50
+            $response = $client->listIntents($requestObj);
+            $intents = [];
+            $counter = 1;
+            
+            foreach ($response->iterateAllElements() as $intent) {
+                // Count training phrases (simplified)
+                $trainingPhrases = $intent->getTrainingPhrases();
+                $trainingCount = 0;
                 
-                $response = $client->listIntents($requestObj);
-                $intents = $this->processIntents($response, $client, $projectId);
-                
-            } catch (\Throwable $e) {
-                \Log::error("Failed with default language: " . $e->getMessage());
-                
-                // Method 2: Try with empty string language
-                try {
-                    $requestObj = new ListIntentsRequest();
-                    $requestObj->setParent($parent);
-                    $requestObj->setLanguageCode('');
-                    $requestObj->setPageSize(50);
-                    
-                    $response = $client->listIntents($requestObj);
-                    $intents = $this->processIntents($response, $client, $projectId);
-                    
-                } catch (\Throwable $e2) {
-                    throw new \Exception("Failed to fetch intents: " . $e2->getMessage());
+                if ($trainingPhrases) {
+                    $trainingCount = iterator_count($trainingPhrases);
                 }
+                
+                // Count responses (simplified)
+                $messages = $intent->getMessages();
+                $responseCount = 0;
+                
+                if ($messages) {
+                    $responseCount = iterator_count($messages);
+                }
+                
+                // Determine status
+                $status = 'Regular';
+                if (method_exists($intent, 'getIsFallback') && $intent->getIsFallback()) {
+                    $status = 'Fallback';
+                }
+                
+                // Get display name
+                $displayName = $intent->getDisplayName();
+                
+                // Create simple text representations
+                $trainingText = $trainingCount > 0 ? "Has {$trainingCount} training phrases" : "No training phrases";
+                $responseText = $responseCount > 0 ? "Has {$responseCount} responses" : "No responses";
+                
+                $intents[] = [
+                    'id' => $counter++,
+                    'intent_name' => $intent->getName(),
+                    'display_name' => $displayName,
+                    'training_phrases_text' => $trainingText,
+                    'training_phrases_count' => $trainingCount,
+                    'responses_text' => $responseText,
+                    'responses_count' => $responseCount,
+                    'status' => $status,
+                    'last_modified' => date('Y-m-d H:i:s'),
+                    'actions' => 'Edit | Delete'
+                ];
             }
-            
+
             return response()->json([
                 'success' => true,
                 'data' => [
                     'intents_synced' => count($intents),
                     'intents' => $intents,
-                    'is_mock_data' => false
+                    'is_mock_data' => false,
+                    'message' => 'Successfully fetched ' . count($intents) . ' intents'
                 ]
             ])->withHeaders($headers);
 
         } catch (\Throwable $e) {
-            \Log::error('DialogflowSync Error: ' . $e->getMessage());
-            
             return response()->json([
                 'success' => false,
                 'message' => 'Dialogflow sync failed: ' . $e->getMessage(),
@@ -99,214 +120,16 @@ class DialogflowSyncController extends Controller
         }
     }
     
-    private function processIntents($response, $client, $projectId)
-    {
-        $intents = [];
-        $counter = 1;
-        
-        foreach ($response->iterateAllElements() as $intent) {
-            // Debug the first intent to see structure
-            if ($counter === 1) {
-                $this->debugIntentStructure($intent);
-            }
-            
-            // Get training phrases - SIMPLIFIED APPROACH
-            $trainingPhrases = $intent->getTrainingPhrases();
-            $trainingCount = 0;
-            $trainingTexts = [];
-            
-            if ($trainingPhrases) {
-                // Try multiple counting methods
-                try {
-                    // Method 1: iterator_count
-                    $trainingCount = iterator_count($trainingPhrases);
-                } catch (\Exception $e) {
-                    // Method 2: Manual iteration
-                    $tempCount = 0;
-                    foreach ($trainingPhrases as $phrase) {
-                        $tempCount++;
-                        if ($tempCount <= 3 && $phrase instanceof TrainingPhrase) {
-                            $text = $this->extractTextFromTrainingPhrase($phrase);
-                            if ($text) {
-                                $trainingTexts[] = '"' . $text . '"';
-                            }
-                        }
-                    }
-                    $trainingCount = $tempCount;
-                }
-            }
-            
-            // Get responses
-            $messages = $intent->getMessages();
-            $responseCount = 0;
-            $responseTexts = [];
-            
-            if ($messages) {
-                try {
-                    $responseCount = iterator_count($messages);
-                    
-                    $msgCounter = 0;
-                    foreach ($messages as $message) {
-                        $msgCounter++;
-                        if ($msgCounter > 2) break;
-                        
-                        $text = $message->getText();
-                        if ($text) {
-                            $textParts = $text->getText();
-                            if ($textParts) {
-                                $fullText = '';
-                                foreach ($textParts as $part) {
-                                    $fullText .= $part . ' ';
-                                }
-                                if (trim($fullText)) {
-                                    $responseTexts[] = '"' . $this->cleanText(substr(trim($fullText), 0, 50)) . '..."';
-                                }
-                            }
-                        }
-                    }
-                } catch (\Exception $e) {
-                    \Log::warning("Error counting messages: " . $e->getMessage());
-                }
-            }
-            
-            // Determine status
-            $status = 'Regular';
-            if (method_exists($intent, 'getIsFallback') && $intent->getIsFallback()) {
-                $status = 'Fallback';
-            }
-            
-            // Get last modified
-            $lastModified = 'N/A';
-            if (method_exists($intent, 'getUpdateTime')) {
-                $updateTime = $intent->getUpdateTime();
-                if ($updateTime) {
-                    $lastModified = $updateTime->toDateTime()->format('Y-m-d H:i:s');
-                }
-            }
-            
-            $intents[] = [
-                'id' => $counter++,
-                'intent_name' => $intent->getName(),
-                'display_name' => $intent->getDisplayName(),
-                'training_phrases_text' => !empty($trainingTexts) ? implode(', ', $trainingTexts) : 'No training phrases',
-                'training_phrases_count' => $trainingCount,
-                'responses_text' => !empty($responseTexts) ? implode(', ', $responseTexts) : 'No responses',
-                'responses_count' => $responseCount,
-                'status' => $status,
-                'last_modified' => $lastModified,
-                'actions' => 'Edit | Delete'
-            ];
-            
-            // Stop after 50 intents for testing
-            if ($counter > 50) {
-                break;
-            }
-        }
-        
-        return $intents;
-    }
-    
-    private function debugIntentStructure($intent)
-    {
-        \Log::info('=== INTENT STRUCTURE DEBUG ===');
-        \Log::info('Display Name: ' . $intent->getDisplayName());
-        
-        $trainingPhrases = $intent->getTrainingPhrases();
-        \Log::info('Training Phrases Object:', [
-            'type' => gettype($trainingPhrases),
-            'class' => $trainingPhrases ? get_class($trainingPhrases) : 'null',
-            'is_iterable' => is_iterable($trainingPhrases),
-            'is_countable' => is_countable($trainingPhrases),
-        ]);
-        
-        if ($trainingPhrases && is_iterable($trainingPhrases)) {
-            $count = 0;
-            foreach ($trainingPhrases as $phrase) {
-                $count++;
-                if ($count <= 2) {
-                    \Log::info("Training Phrase #{$count}:", [
-                        'class' => get_class($phrase),
-                        'methods' => get_class_methods($phrase)
-                    ]);
-                    
-                    if ($phrase instanceof TrainingPhrase) {
-                        $parts = $phrase->getParts();
-                        \Log::info("  Parts:", [
-                            'type' => gettype($parts),
-                            'class' => get_class($parts),
-                            'is_iterable' => is_iterable($parts)
-                        ]);
-                        
-                        if ($parts && is_iterable($parts)) {
-                            $partCount = 0;
-                            foreach ($parts as $part) {
-                                $partCount++;
-                                \Log::info("  Part #{$partCount}: " . $part->getText());
-                                if ($partCount >= 2) break;
-                            }
-                        }
-                    }
-                }
-                if ($count >= 5) break;
-            }
-            \Log::info("Total training phrases found by iteration: " . $count);
-        }
-        
-        // Try alternative method to get training phrases
-        if (method_exists($intent, 'serializeToJsonString')) {
-            try {
-                $json = $intent->serializeToJsonString();
-                $data = json_decode($json, true);
-                if (isset($data['trainingPhrases'])) {
-                    \Log::info('Training phrases in JSON:', [
-                        'count' => count($data['trainingPhrases']),
-                        'sample' => array_slice($data['trainingPhrases'], 0, 2)
-                    ]);
-                }
-            } catch (\Exception $e) {
-                \Log::warning('Could not serialize to JSON: ' . $e->getMessage());
-            }
-        }
-    }
-    
-    private function extractTextFromTrainingPhrase($phrase)
-    {
-        if (!$phrase instanceof TrainingPhrase) {
-            return '';
-        }
-        
-        $text = '';
-        $parts = $phrase->getParts();
-        
-        if ($parts && is_iterable($parts)) {
-            foreach ($parts as $part) {
-                $text .= $part->getText();
-            }
-        }
-        
-        return $this->cleanText($text);
-    }
-    
-    private function cleanText($text)
-    {
-        $text = trim($text);
-        $text = str_replace('"', '\"', $text);
-        if (strlen($text) > 100) {
-            $text = substr($text, 0, 97) . '...';
-        }
-        return $text;
-    }
-    
     private function getMockIntents()
     {
         return [
             [
                 'id' => 1,
-                'intent_name' => 'projects/aihra-472311/agent/intents/mock-1',
+                'intent_name' => 'projects/aihra-472311/agent/intents/0008b207-67fa-42cf-abd1-db1fbdbc2fc8',
                 'display_name' => 'EmployeeDevelopment_StudyGrantC_016',
-                'training_phrases_text' => '"How to apply for study grant?", "What is eligibility?"',
+                'training_phrases_text' => '"How do I apply for study grant?"',
                 'training_phrases_count' => 5,
-                'responses_text' => '"Study grants help employees..."',
+                'responses_text' => '"Study grants are available..."',
                 'responses_count' => 2,
                 'status' => 'Regular',
                 'last_modified' => date('Y-m-d H:i:s'),
@@ -314,11 +137,11 @@ class DialogflowSyncController extends Controller
             ],
             [
                 'id' => 2,
-                'intent_name' => 'projects/aihra-472311/agent/intents/mock-2',
+                'intent_name' => 'projects/aihra-472311/agent/intents/002f487e-ab1f-4757-99c4-d74b1ad0aa94',
                 'display_name' => 'EmployeeDevelopment_Seminars_003',
-                'training_phrases_text' => '"Available seminars?", "How to register?"',
+                'training_phrases_text' => '"What seminars are available?"',
                 'training_phrases_count' => 3,
-                'responses_text' => '"Seminars improve skills..."',
+                'responses_text' => '"Seminars are scheduled..."',
                 'responses_count' => 1,
                 'status' => 'Regular',
                 'last_modified' => date('Y-m-d H:i:s'),
