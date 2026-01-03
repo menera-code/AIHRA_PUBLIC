@@ -5,30 +5,68 @@ namespace App\Http\Controllers;
 use Google\Cloud\Dialogflow\V2\Client\IntentsClient;
 use Google\Cloud\Dialogflow\V2\ListIntentsRequest;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class DialogflowSyncController extends Controller
 {
-    public function sync(): JsonResponse
+    public function sync(Request $request): JsonResponse
     {
+        // Set CORS headers
+        $headers = [
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers' => 'Content-Type, Authorization, X-Requested-With, X-CSRF-TOKEN',
+        ];
+        
         try {
-            // Get project ID
-            $projectId = env('DIALOGFLOW_PROJECT_ID', 'aihra-472311');
-            
             // Get credentials
             $credentials = $this->getDialogflowCredentials();
             
-            // Create Dialogflow client (v2.3+ syntax)
+            // If no credentials, return mock data
+            if (!$credentials) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'intents_synced' => 3,
+                        'intents' => [
+                            [
+                                'id' => 'projects/aihra-472311/agent/intents/mock-1',
+                                'display_name' => 'Welcome Intent',
+                                'training_phrases' => 5
+                            ],
+                            [
+                                'id' => 'projects/aihra-472311/agent/intents/mock-2', 
+                                'display_name' => 'FAQ Intent',
+                                'training_phrases' => 8
+                            ],
+                            [
+                                'id' => 'projects/aihra-472311/agent/intents/mock-3',
+                                'display_name' => 'Fallback Intent',
+                                'training_phrases' => 1
+                            ]
+                        ],
+                        'is_mock_data' => true,
+                        'message' => 'Dialogflow credentials not configured. Using mock data.'
+                    ],
+                    'message' => 'Using mock data - configure Dialogflow credentials'
+                ])->withHeaders($headers);
+            }
+            
+            // Get project ID
+            $projectId = env('DIALOGFLOW_PROJECT_ID', 'aihra-472311');
+            
+            // Create Dialogflow client
             $client = new IntentsClient([
                 'credentials' => $credentials,
                 'projectId' => $projectId
             ]);
 
-            // List intents (v2.3+ syntax)
+            // List intents
             $parent = "projects/{$projectId}/agent";
-            $request = new ListIntentsRequest();
-            $request->setParent($parent);
+            $requestObj = new ListIntentsRequest();
+            $requestObj->setParent($parent);
             
-            $response = $client->listIntents($request);
+            $response = $client->listIntents($requestObj);
             $intents = [];
             
             foreach ($response->iterateAllElements() as $intent) {
@@ -39,7 +77,7 @@ class DialogflowSyncController extends Controller
                 ];
             }
 
-            // ✅ RETURN THE FORMAT YOUR X10 LARAVEL EXPECTS
+            // Return success with real data
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -49,10 +87,9 @@ class DialogflowSyncController extends Controller
                     'message' => 'Successfully fetched ' . count($intents) . ' intents from Dialogflow'
                 ],
                 'message' => 'Sync successful'
-            ]);
+            ])->withHeaders($headers);
 
         } catch (\Throwable $e) {
-            // ✅ RETURN ERROR IN YOUR X10 FORMAT
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage(),
@@ -62,7 +99,7 @@ class DialogflowSyncController extends Controller
                     'is_mock_data' => true,
                     'error' => $e->getMessage()
                 ]
-            ], 500);
+            ], 500)->withHeaders($headers);
         }
     }
     
