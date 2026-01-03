@@ -39,7 +39,7 @@ RUN echo "=== DEBUG: Checking files ===" && \
 RUN composer install --no-dev --no-interaction --optimize-autoloader
 
 # ✅ INSTALL CORS PACKAGE
-RUN composer require fruitcake/laravel-cors --no-interaction
+
 
 # ✅ DEBUGGING: Check after install
 RUN echo "=== DEBUG: After composer install ===" && \
