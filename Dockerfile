@@ -27,7 +27,7 @@ COPY . /var/www/html/
 # Set working directory
 WORKDIR /var/www/html
 
-# ✅ ADD DEBUGGING: Check files before composer install
+# ✅ DEBUGGING: Check files before composer install
 RUN echo "=== DEBUG: Checking files ===" && \
     ls -la && \
     echo "=== DEBUG: Checking composer.json ===" && \
@@ -38,7 +38,7 @@ RUN echo "=== DEBUG: Checking files ===" && \
 # Install Composer dependencies WITH VERBOSE OUTPUT
 RUN composer install --no-dev --no-interaction --optimize-autoloader --verbose
 
-# ✅ ADD DEBUGGING: Check after install
+# ✅ DEBUGGING: Check after install
 RUN echo "=== DEBUG: After composer install ===" && \
     echo "Vendor directory:" && \
     ls -la vendor/ && \
@@ -64,13 +64,13 @@ RUN cat > /etc/apache2/sites-available/000-default.conf << 'EOF'
 </VirtualHost>
 EOF
 
-# ✅ ADD: Create a test PHP file to verify installation
-RUN echo "<?php
-require __DIR__ . '/vendor/autoload.php';
-echo 'PHP Version: ' . phpversion() . \"\\n\";
-echo 'Dialogflow IntentsClient exists: ' . (class_exists('Google\\\\Cloud\\\\Dialogflow\\\\V2\\\\IntentsClient') ? 'YES' : 'NO') . \"\\n\";
-echo 'Google Cloud Core exists: ' . (class_exists('Google\\\\Cloud\\\\Core\\\\ServiceBuilder') ? 'YES' : 'NO') . \"\\n\";
-?>" > /var/www/html/test-install.php
+# ✅ FIXED: Create a test PHP file
+RUN echo '<?php
+require __DIR__ . "/vendor/autoload.php";
+echo "PHP Version: " . phpversion() . "\n";
+echo "Dialogflow IntentsClient exists: " . (class_exists("Google\Cloud\Dialogflow\V2\IntentsClient") ? "YES" : "NO") . "\n";
+echo "Google Cloud Core exists: " . (class_exists("Google\Cloud\Core\ServiceBuilder") ? "YES" : "NO") . "\n";
+?>' > /var/www/html/test-install.php
 
 EXPOSE 80
 CMD ["apache2-foreground"]
