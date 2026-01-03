@@ -64,13 +64,5 @@ RUN cat > /etc/apache2/sites-available/000-default.conf << 'EOF'
 </VirtualHost>
 EOF
 
-# ✅ FIXED: Create a test PHP file
-RUN echo '<?php
-require __DIR__ . "/vendor/autoload.php";
-echo "PHP Version: " . phpversion() . "\n";
-echo "Dialogflow IntentsClient exists: " . (class_exists("Google\Cloud\Dialogflow\V2\IntentsClient") ? "YES" : "NO") . "\n";
-echo "Google Cloud Core exists: " . (class_exists("Google\Cloud\Core\ServiceBuilder") ? "YES" : "NO") . "\n";
-?>' > /var/www/html/test-install.php
-
 EXPOSE 80
 CMD ["apache2-foreground"]
