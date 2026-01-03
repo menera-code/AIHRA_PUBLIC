@@ -11,9 +11,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions
+# Install PHP extensions - ADDED bcmath
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install pdo_mysql mysqli gd zip
+    && docker-php-ext-install pdo_mysql mysqli gd zip bcmath
 
 # Enable Apache rewrite module
 RUN a2enmod rewrite
