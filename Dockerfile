@@ -36,7 +36,7 @@ RUN echo "=== DEBUG: Checking files ===" && \
     ls -la vendor/ 2>/dev/null || echo "No vendor directory"
 
 # Install Composer dependencies WITH VERBOSE OUTPUT
-RUN composer install --no-dev --no-interaction --optimize-autoloader --verbose
+RUN composer update --no-dev --no-interaction --optimize-autoloader
 
 # ✅ INSTALL CORS PACKAGE
 RUN composer require fruitcake/laravel-cors --no-interaction
